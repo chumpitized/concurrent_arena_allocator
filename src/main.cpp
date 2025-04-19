@@ -3,6 +3,7 @@
 #include <iostream>
 #include <windows.h>
 #include <atomic>
+#include <thread>
 
 #ifndef DEFAULT_ALIGNMENT
 #define DEFAULT_ALIGNMENT sizeof(void *)
@@ -31,34 +32,20 @@ bool is_power_of_two(size_t x) {
 	return (x & (x - 1)) == 0;
 }
 
-uptr align_forward(uptr ptr, size_t align) {
-	assert(is_power_of_two(align));
-
-	uptr modulo = ptr & ((uptr)align - 1);
-
-	if (modulo != 0) {
-		ptr += (uptr)align - modulo;
-	}
-
-	return ptr;
+size_t align_forward(size_t size, size_t align) {
+	return (size + align - 1) & ~(align - 1);
 }
 
 void *arena_concurrent_alloc(Arena *a, size_t size, size_t align) {
-	size_t curr_offset = a->curr_offset.load();
-
-	while (true) {
-		uptr curr_ptr = (uptr)a->buffer + (uptr)curr_offset;
-		uptr offset = align_forward(curr_ptr, align);
-		offset -= (uptr)a->buffer;
-
-		if (offset + size > a->length) {
-			return NULL;
-		}
-
-		if (a->curr_offset.compare_exchange_weak(curr_offset, offset + size)) {
-			return &a->buffer[offset];
-		}
+	size_t aligned_size = align_forward(size, align);
+	size_t offset = a->curr_offset.fetch_add(aligned_size);
+	
+	if (offset + size > a->length) {
+		a->curr_offset.fetch_sub(aligned_size);
+		return NULL;
 	}
+
+	return &a->buffer[offset];
 }
 
 void arena_clear(Arena *a) {
