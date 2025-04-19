@@ -62,7 +62,7 @@ void allocate(Arena *a) {
 
 int main() {
 	size_t mb = 1024 * 1024;
-	unsigned char *buffer = new unsigned char[mb];
+	void *buffer = malloc(mb);
 	Arena *a = new Arena;
 	arena_init(a, buffer, mb);
 
