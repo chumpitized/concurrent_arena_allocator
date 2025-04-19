@@ -2,6 +2,7 @@
 #include <cstring>
 #include <iostream>
 #include <windows.h>
+#include <atomic>
 
 #ifndef DEFAULT_ALIGNMENT
 #define DEFAULT_ALIGNMENT sizeof(void *)
@@ -16,9 +17,9 @@ typedef uintptr_t uptr;
 typedef struct Arena Arena;
 struct Arena {
 	unsigned char *buffer;
-	size_t committed;
+	std::atomic<size_t> committed;
 	size_t length;
-	size_t curr_offset;
+	std::atomic<size_t> curr_offset;
 };
 
 void arena_init(Arena *a, size_t length) {
@@ -52,6 +53,49 @@ size_t commit_memory(Arena *a, size_t offset, size_t size) {
 	size_t diff = total_alloc - a->committed;
 
 	return (diff + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+}
+
+size_t concurrent_commit_memory(size_t committed, size_t offset, size_t size) {
+	size_t total_alloc = offset + size;
+
+	if (total_alloc <= committed) return 0;
+
+	size_t diff = total_alloc - committed;
+
+	return (diff + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+}
+
+
+void *arena_concurrent_alloc(Arena *a, size_t size, size_t align) {
+	size_t curr_offset = a->curr_offset.load();
+
+	while (true) {
+		uptr curr_ptr = (uptr)a->buffer + (uptr)curr_offset;
+		uptr offset = align_forward(curr_ptr, align);
+		offset -= (uptr)a->buffer;
+
+		if (offset + size > a->length) {
+			return NULL;
+		}
+
+		if (a->curr_offset.compare_exchange_weak(curr_offset, offset + size)) {
+
+			size_t committed = a->committed.load();
+
+			while (true) {
+				size_t to_commit = concurrent_commit_memory(committed, offset, size);
+				
+				if (!to_commit) break;
+				
+				if (a->committed.compare_exchange_weak(committed, committed + to_commit)) {
+					VirtualAlloc(&a->buffer[committed], to_commit, MEM_COMMIT, PAGE_READWRITE);
+					break;
+				}
+			}
+
+			return &a->buffer[offset];
+		}
+	}
 }
 
 void *arena_alloc(Arena *a, size_t size, size_t align) {
