@@ -52,27 +52,27 @@ void arena_clear(Arena *a) {
 	a->curr_offset.store(0);
 }
 
+void allocate(Arena *a) {
+	for (int i = 0; i < 1024; ++i) {
+		std::cout << "Allocating int from thread ID: " << std::this_thread::get_id() << std::endl;
+		arena_concurrent_alloc(a, 4, DEFAULT_ALIGNMENT);
+		std::cout << "Current offset is " << a->curr_offset.load() << std::endl;
+	}
+}
+
 int main() {
 	size_t mb = 1024 * 1024;
-	unsigned char buffer[mb]; 
-	Arena a = {0};
-	arena_init(&a, buffer, mb);
+	unsigned char *buffer = new unsigned char[mb];
+	Arena *a = new Arena;
+	arena_init(a, buffer, mb);
 
-	for (int i = 0; i < 1024; ++i) {
-		std::cout << "Allocating int..." << std::endl;
-		arena_concurrent_alloc(&a, 4, DEFAULT_ALIGNMENT);
-		std::cout << "Current offset is " << a.curr_offset << std::endl;
-	}
+	std::thread t1(allocate, a);
+	std::thread t2(allocate, a);
+	std::thread t3(allocate, a);
 
-	std::cout << std::endl;
-	std::cout << "Allocating int..." << std::endl;
-	arena_concurrent_alloc(&a, 4, DEFAULT_ALIGNMENT);
-	std::cout << "Current offset is " << a.curr_offset << std::endl;
-
-	std::cout << std::endl;
-	std::cout << "Clearing the arena..." << std::endl;
-	arena_clear(&a);
-	std::cout << "Current offset is " << a.curr_offset << std::endl;
+	t1.join();
+	t2.join();
+	t3.join();
 
 	return 0;
 }
